@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+
+<style>
+    body {
+        background-color: rgb(35, 35, 35);
+        color: white;
+        margin: 20px;
+    }
+
+    .main {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        padding: 20px 0;
+        width: 100%;
+    }
+
+    #viewport {
+        background-color: #000;
+        border: 2px solid #555;
+        width: 854px;
+        height: 480px;
+    }
+</style>
+
+</head>
+<body>
+    <button id="pingbtn">ping</button>
+    <code id="output">PING: 0</code>
+    <div class="main">
+        <canvas id="viewport"></canvas>
+    </div>
+    <script type="module" src="app.js"></script>
+    <script>
+        const pingbtn = document.getElementById("pingbtn");
+
+        pingbtn.addEventListener("click", () => {
+            window.app.network.send(JSON.stringify({
+                type: "ping"})) 
+        })
+    </script>
+</body>
+</html>
