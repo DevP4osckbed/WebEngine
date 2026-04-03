@@ -15,10 +15,10 @@ class App {
         this.displayedFps = 0;
 
         this.network = new NetworkManager(document.getElementById('output'));
-        this.setupWorker();
+        this.setupWorkers();
     }
-
-    setupWorker() {
+    
+    setupWorkers() {
         // Create a hidden canvas for the worker to draw on
         const offscreen = new OffscreenCanvas(854, 480);
         console.log("Loading Workers")
@@ -36,6 +36,17 @@ class App {
                 this.drawFrame(e.data.bitmap);
             }
         };
+
+        //CREATE GAME LOADER WORKER
+
+        this.runnerWorker = new Worker('js/runner.worker.js', { type: 'module' });
+        this.runnerWorker.onerror = (error) => {
+            console.error("Runner Worker Error:", error.message, "at", error.filename, ":", error.lineno);
+        };
+
+        
+
+
     }
 
     updateFps() {
