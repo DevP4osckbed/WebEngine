@@ -40,9 +40,13 @@
         const pingbtn = document.getElementById("pingbtn");
 
         pingbtn.addEventListener("click", () => {
-            window.app.network.send(JSON.stringify({
-                type: "ping"})) 
-        })
+            // Use the NetworkManager instance logic
+            window.app.network.send({
+                type: "ping",
+                startTime: Date.now()
+            });
+        });
+
     </script>
 </body>
 </html>

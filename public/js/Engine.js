@@ -30,8 +30,20 @@ export class Engine {
         const shader = new Shader(this.gl, vs, fs);
         const mat = new Material(shader);
         
-        const triangleData = [0, 0.5, 0, 1, 0, 0, -0.5, -0.5, 0, 0, 1, 0, 0.5, -0.5, 0, 0, 0, 1];
-        this.meshes.push(new Mesh(this.gl, triangleData, mat));
+        const vertexData = [
+            -0.5,  0.5, 0,  1, 0, 0,  // Top Left
+            -0.5, -0.5, 0,  0, 1, 0,  // Bottom Left
+            0.5, -0.5, 0,  0, 0, 1,  // Bottom Right
+            0.5,  0.5, 0,  1, 1, 0   // Top Right
+        ];
+
+        // Indices defining two triangles: (0,1,2) and (0,2,3)
+        const indexData = [
+            0, 1, 2,
+            0, 2, 3
+        ];
+
+        this.meshes.push(new Mesh(this.gl, vertexData, indexData, mat));
     }
 
     update() {
