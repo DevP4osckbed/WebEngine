@@ -1,524 +1,271 @@
-import { FileSystem } from "./filesystem.js";
-import { renderTree, renderEditor } from "./ui.js";
-import {
-    saveEntry,
-    saveEntries,
-    loadEntries,
-    deleteEntryRecord,
-    saveBlob,
-    loadBlob,
-    deleteBlob,
-    clearEntries,
-    clearBlobs
-} from "./storage.js";
-import {
-    guessMimeTypeFromPath,
-    isTextMimeType,
-    base64ToBlob
-} from "./encoding.js";
+import { EditorFS } from "./EditorFS.js";
+// Import core CodeMirror components from esm.sh
+import { EditorView, basicSetup } from 'https://esm.sh/codemirror';
+import { javascript } from 'https://esm.sh/@codemirror/lang-javascript';
+import { oneDark } from 'https://esm.sh/@codemirror/theme-one-dark';
+import { keymap } from 'https://esm.sh/@codemirror/view';
+import { indentWithTab } from 'https://esm.sh/@codemirror/commands';
+const fs = await new EditorFS({
+    onStatus: (msg) => console.log(`[FS]: ${msg}`)
+}).init();
 
-const fs = new FileSystem();
-
-let selectedPath = null;
-let renderToken = 0;
-
-const fileTreeEl = document.getElementById("fileTree");
-const editorTitleEl = document.getElementById("editorTitle");
-const editorBodyEl = document.getElementById("editorBody");
-
-const newFolderBtn = document.getElementById("newFolderBtn");
-const newFileBtn = document.getElementById("newFileBtn");
-const uploadBtn = document.getElementById("uploadBtn");
-const importBtn = document.getElementById("importBtn");
-const uploadInput = document.getElementById("uploadInput");
-const importInput = document.getElementById("importInput");
-const deleteBtn = document.getElementById("deleteBtn");
-const exportBtn = document.getElementById("exportBtn");
-const uploadStatusEl = document.getElementById("uploadStatus");
-
-function setStatus(message) {
-    if (uploadStatusEl) {
-        uploadStatusEl.textContent = message;
+class App {
+    constructor() {
+        this.path = null;
+        this.ctxPath = null;
+        this.activeWorker = null;
+        this.blobUrls = new Map();
+        this.editor = null;
+        
+        this.els = {
+            sidebar: document.getElementById("sidebar"),
+            container: document.getElementById("editor-container"),
+            console: document.getElementById("console"),
+            pathLab: document.getElementById("path-label"),
+            ctx: document.getElementById("ctx")
+        };
+        this.init();
     }
-    console.log("[editor]", message);
-}
 
-function nextFrame() {
-    return new Promise(resolve => requestAnimationFrame(resolve));
-}
-
-async function rerender() {
-    const token = ++renderToken;
-
-    renderTree({
-        fs,
-        selectedPath,
-        fileTreeEl,
-        onSelect(path) {
-            selectedPath = path;
-            rerender();
-        }
-    });
-
-    await renderEditor({
-        fs,
-        selectedPath,
-        editorTitleEl,
-        editorBodyEl,
-        loadBlobForEntry: entry => loadBlob(entry.blobKey),
-        onChange: handleEditorChange
-    });
-
-    if (token !== renderToken) return;
-}
-
-async function handleEditorChange(action) {
-    try {
-        if (action.type === "rename") {
-            const originalEntry = fs.getEntry(action.oldPath);
-            if (!originalEntry) return;
-
-            const oldBlobKey = originalEntry.blobKey || null;
-            const wasBlob = originalEntry.encoding === "blob";
-
-            const renamed = fs.renameEntry(action.oldPath, action.newPath);
-            selectedPath = renamed.path;
-
-            if (wasBlob && oldBlobKey) {
-                const blob = await loadBlob(oldBlobKey);
-                if (blob) {
-                    await saveBlob(renamed.blobKey, blob);
-                    await deleteBlob(oldBlobKey);
-                }
-            }
-
-            const affected = fs.listEntries().filter(entry =>
-                entry.path === renamed.path || entry.path.startsWith(renamed.path + "/")
-            );
-
-            await saveEntries(affected);
-            await rerender();
-            return;
-        }
-
-        if (action.type === "updateMeta") {
-            const updated = fs.updateEntry(action.path, {
-                tags: action.tags,
-                exportable: action.exportable
-            });
-
-            await saveEntry(updated);
-            await rerender();
-            return;
-        }
-
-        if (action.type === "updateText") {
-            const path = action.path;
-            const existing = fs.getEntry(path);
-            if (!existing || existing.type !== "file") return;
-
-            const text = action.text;
-            const updated = fs.updateEntry(path, {
-                inlineText: text,
-                size: new Blob([text], { type: existing.mimeType || "text/plain" }).size,
-                encoding: "utf-8"
-            });
-
-            await saveEntry(updated);
-
-            const modifiedValue = document.getElementById("modifiedValue");
-            if (modifiedValue) {
-                modifiedValue.textContent = updated.modified;
-            }
-
-            return;
-        }
-    } catch (error) {
-        alert(error.message);
-        await rerender();
-    }
-}
-
-function seedProject() {
-    fs.createFolder("/assets");
-    fs.createFolder("/worlds");
-    fs.createFolder("/uploads");
-
-    fs.createFile({
-        path: "/assets/readme.txt",
-        tags: ["info"],
-        encoding: "utf-8",
-        mimeType: "text/plain",
-        size: "Put imported files here.".length,
-        inlineText: "Put imported files here.",
-        blobKey: null,
-        exportable: true
-    });
-
-    fs.createFile({
-        path: "/worlds/test-world.json",
-        tags: ["world"],
-        encoding: "utf-8",
-        mimeType: "application/json",
-        size: `{
-  "name": "Test World",
-  "gravity": 9.8
-}`.length,
-        inlineText: `{
-  "name": "Test World",
-  "gravity": 9.8
-}`,
-        blobKey: null,
-        exportable: true
-    });
-}
-
-async function initialize() {
-    try {
-        const storedEntries = await loadEntries();
-
-        if (storedEntries && storedEntries.length > 0) {
-            fs.loadEntries(storedEntries);
-            setStatus("Loaded project from IndexedDB");
-        } else {
-            seedProject();
-            await saveEntries(fs.listEntries());
-            setStatus("Created new project");
-        }
-
-        await rerender();
-    } catch (error) {
-        console.error(error);
-        seedProject();
-        setStatus(`Initialization fallback: ${error.message}`);
-        await rerender();
-    }
-}
-
-async function createFolderPrompt() {
-    const path = prompt("Enter folder path:", "/new-folder");
-    if (!path) return;
-
-    try {
-        const folder = fs.createFolder(path);
-        selectedPath = folder.path;
-        await saveEntry(folder);
-        await rerender();
-    } catch (error) {
-        alert(error.message);
-    }
-}
-
-async function createFilePrompt() {
-    const path = prompt("Enter file path:", "/new-file.txt");
-    if (!path) return;
-
-    try {
-        const mimeType = guessMimeTypeFromPath(path);
-
-        const file = fs.createFile({
-            path,
-            encoding: "utf-8",
-            mimeType,
-            size: 0,
-            inlineText: "",
-            blobKey: null,
-            tags: [],
-            exportable: true
+    async init() {
+        // Initialize CodeMirror 6
+        this.editor = new EditorView({
+            doc: "// WebEngine Ready\n// Select a file to begin...",
+            extensions: [
+                basicSetup,
+                javascript(),
+                oneDark,
+                EditorView.lineWrapping,
+                // 2. Add the keymap extension here:
+                keymap.of([indentWithTab]) 
+            ],
+            parent: this.els.container
         });
 
-        selectedPath = file.path;
-        await saveEntry(file);
-        await rerender();
-    } catch (error) {
-        alert(error.message);
+        this.bindEvents();
+        this.refresh();
+    }   
+
+    bindEvents() {
+        // Menubar handling
+        document.querySelectorAll(".menu-btn").forEach(btn => {
+            btn.onclick = (e) => {
+                const parent = btn.parentElement;
+                if (parent.classList.contains("menu")) {
+                    const isOpen = parent.classList.contains("open");
+                    document.querySelectorAll(".menu").forEach(m => m.classList.remove("open"));
+                    if (!isOpen) parent.classList.add("open");
+                    e.stopPropagation();
+                }
+            };
+        });
+
+        document.addEventListener("click", (e) => {
+            const action = e.target.dataset.action;
+            if (action) this.handleAction(action);
+            if (!e.target.closest(".menu")) {
+                document.querySelectorAll(".menu").forEach(m => m.classList.remove("open"));
+            }
+            this.els.ctx.style.display = "none";
+        });
+
+        this.els.sidebar.oncontextmenu = (e) => {
+            const item = e.target.closest(".file-item");
+            if (!item) return;
+            e.preventDefault();
+            this.ctxPath = item.dataset.path;
+            this.els.ctx.style.display = "block";
+            this.els.ctx.style.left = e.clientX + "px";
+            this.els.ctx.style.top = e.clientY + "px";
+        };
+
+        window.onkeydown = (e) => {
+            if (e.ctrlKey && e.key === 's') { 
+                e.preventDefault(); 
+                this.handleAction('save-file'); 
+            }
+        };
     }
-}
 
-async function uploadFiles(fileList) {
-    const totalFiles = fileList.length;
+    async handleAction(action) {
+        switch (action) {
+            case "new-file":
+                const name = prompt("File name (e.g. main.js):");
+                if (name) {
+                    const parent = this.ctxPath || "/";
+                    const fullPath = (parent.endsWith('/') ? parent + name : parent + '/' + name).replace(/\/+/g, '/');
+                    await fs.createFile(fullPath);
+                    this.refresh();
+                }
+                break;
+            case "new-folder":
+                const fName = prompt("Folder name:");
+                if (fName) {
+                    const parent = this.ctxPath || "/";
+                    const fullPath = (parent.endsWith('/') ? parent + fName : parent + '/' + fName).replace(/\/+/g, '/');
+                    await fs.createFolder(fullPath);
+                    this.refresh();
+                }
+                break;
+            case "save-file":
+                if (this.path && this.editor) {
+                    const content = this.editor.state.doc.toString();
+                    await fs.writeText(this.path, content);
+                    this.log(`Saved: ${this.path}`, "#4ec9b0");
+                }
+                break;
+            case "delete":
+                if (this.ctxPath && confirm(`Delete ${this.ctxPath}?`)) {
+                    await fs.deletePath(this.ctxPath);
+                    if (this.path === this.ctxPath) {
+                        this.path = null;
+                        this.setEditorValue("");
+                    }
+                    this.refresh();
+                }
+                break;
+            case "run-project": await this.runProject(); break;
+            case "refresh": this.refresh(); break;
+            case "upload-files": await fs.upload(); this.refresh(); break;
+            case "import-project": await fs.importProject(); this.refresh(); break;
+            case "export-project": await fs.exportProject(); break;
+        }
+        this.ctxPath = null;
+    }
 
-    for (let index = 0; index < totalFiles; index++) {
-        const file = fileList[index];
+    setEditorValue(text) {
+        if (!this.editor) return;
+        this.editor.dispatch({
+            changes: { from: 0, to: this.editor.state.doc.length, insert: text || "" }
+        });
+    }
+
+    async runProject() {
+        if (this.activeWorker) this.activeWorker.terminate();
+        this.log("Building project...", "#9cdcfe");
 
         try {
-            if (!fs.exists("/uploads")) {
-                const uploadsFolder = fs.createFolder("/uploads");
-                await saveEntry(uploadsFolder);
+            const allFiles = await fs.getAllFiles();
+            const sourceMap = {};
+            for (const file of allFiles) {
+                sourceMap[file.path] = await fs.readText(file.path);
             }
 
-            let finalPath = "/uploads/" + file.name;
-            let counter = 1;
+            // Clean up old Blobs to prevent memory leaks
+            this.blobUrls.forEach(url => URL.revokeObjectURL(url));
+            this.blobUrls.clear();
 
-            while (fs.exists(finalPath)) {
-                const dot = file.name.lastIndexOf(".");
-                const base = dot > 0 ? file.name.slice(0, dot) : file.name;
-                const ext = dot > 0 ? file.name.slice(dot) : "";
-                finalPath = `/uploads/${base}-${counter}${ext}`;
-                counter++;
+            // First pass: Create standard Blobs
+            for (const path in sourceMap) {
+                const blob = new Blob([sourceMap[path]], { type: 'application/javascript' });
+                this.blobUrls.set(path, URL.createObjectURL(blob));
             }
 
-            const mimeType = file.type || guessMimeTypeFromPath(file.name);
-
-            setStatus(`Uploading ${file.name} (${index + 1}/${totalFiles})...`);
-
-            if (isTextMimeType(mimeType) && file.size <= 512 * 1024) {
-                const text = await file.text();
-
-                const entry = fs.createFile({
-                    path: finalPath,
-                    encoding: "utf-8",
-                    mimeType,
-                    size: file.size,
-                    inlineText: text,
-                    blobKey: null,
-                    tags: ["uploaded"],
-                    exportable: true
+            // Second pass: Linker logic for internal imports
+            const finalBlobs = new Map();
+            for (const path in sourceMap) {
+                let code = sourceMap[path];
+                code = code.replace(/from\s+['"](\.\/[^'"]+)(['"])/g, (match, relPath, q2) => {
+                    const fileName = relPath.replace('./', '');
+                    const currentDir = path.substring(0, path.lastIndexOf('/') + 1);
+                    const targetPath = (currentDir + fileName).replace(/\/+/g, '/');
+                    const targetUrl = this.blobUrls.get(targetPath);
+                    return targetUrl ? `from "${targetUrl}"` : match;
                 });
-
-                await saveEntry(entry);
-                selectedPath = finalPath;
-                await rerender();
-            } else {
-                const blobKey = `blob:${finalPath}`;
-
-                const entry = fs.createFile({
-                    path: finalPath,
-                    encoding: "blob",
-                    mimeType,
-                    size: file.size,
-                    inlineText: null,
-                    blobKey,
-                    tags: ["uploaded"],
-                    exportable: true
-                });
-
-                await saveEntry(entry);
-                await saveBlob(blobKey, file);
-
-                selectedPath = finalPath;
-                await rerender();
+                finalBlobs.set(path, URL.createObjectURL(new Blob([code], { type: 'application/javascript' })));
             }
 
-            setStatus(`Saved ${file.name} to ${finalPath}`);
-            await nextFrame();
-        } catch (error) {
-            console.error(error);
-            setStatus(`Upload failed for ${file.name}: ${error.message}`);
-            alert(error.message);
+            const oldUrls = Array.from(this.blobUrls.values());
+            this.blobUrls = finalBlobs;
+            
+            let entryPath = this.path || "/scripts/main.js"; // Standardized default
+            if (!this.blobUrls.has(entryPath)) entryPath = Array.from(this.blobUrls.keys())[0];
+
+            const entryUrl = this.blobUrls.get(entryPath);
+            if (!entryUrl) throw new Error("No valid JS file found to run.");
+
+            // Standardize path for IsoAPI
+            const apiPath = `${window.location.href.split('index.html')[0]}IsoAPI.js`;
+
+            const bootstrapCode = `
+                import { IsoAPI } from "${apiPath}";
+                const logToUI = (data, color = "white") => self.postMessage({ type: 'log', data, color });
+                try {
+                    self.iso = new IsoAPI(self);
+                    self.console.log = (...args) => logToUI(args.join(' '));
+                    self.console.error = (...args) => logToUI(args.join(' '), "#f44747");
+                    await import("${entryUrl}");
+                } catch (e) {
+                    logToUI("Runtime Error: " + e.message, "#f44747");
+                }
+            `;
+
+            const bootstrapUrl = URL.createObjectURL(new Blob([bootstrapCode], { type: 'application/javascript' }));
+            this.activeWorker = new Worker(bootstrapUrl, { type: 'module' });
+            
+            this.activeWorker.onmessage = (e) => { 
+                if (e.data.type === 'log') this.log(e.data.data, e.data.color); 
+            };
+
+            // Safe cleanup for imports
+            setTimeout(() => {
+                oldUrls.forEach(url => URL.revokeObjectURL(url));
+                URL.revokeObjectURL(bootstrapUrl);
+            }, 1000);
+
+            this.log(`Started: ${entryPath}`, "#4ec9b0");
+        } catch (err) {
+            this.log(`Build Error: ${err.message}`, "#f44747");
         }
     }
 
-    setStatus(`Done. Uploaded ${totalFiles} file${totalFiles === 1 ? "" : "s"}.`);
-}
+    async refresh() {
+        const buildTree = async (dirPath, depth = 0) => {
+            let html = "";
+            const children = await fs.getChildren(dirPath);
+            // Folders first, then Alphabetical
+            children.sort((a, b) => (b.type === "folder") - (a.type === "folder") || a.path.localeCompare(b.path));
 
-async function deleteSelectedEntry() {
-    if (!selectedPath) {
-        alert("Select a file or folder first.");
-        return;
-    }
-
-    try {
-        const yes = confirm(`Delete ${selectedPath}?`);
-        if (!yes) return;
-
-        const deleted = fs.deleteEntry(selectedPath);
-
-        for (const item of deleted) {
-            await deleteEntryRecord(item.path);
-
-            if (item.type === "file" && item.blobKey) {
-                await deleteBlob(item.blobKey);
+            for (const item of children) {
+                const isFolder = item.type === "folder";
+                const name = item.path.split("/").pop();
+                const active = item.path === this.path ? "active" : "";
+                
+                html += `<div class="file-item ${active}" data-path="${item.path}" data-type="${item.type}" style="padding-left: ${depth * 12 + 10}px">
+                    ${isFolder ? "📁" : "📄"} ${name}
+                </div>`;
+                
+                if (isFolder) {
+                    html += await buildTree(item.path, depth + 1);
+                }
             }
-        }
+            return html;
+        };
 
-        selectedPath = null;
-        setStatus("Entry deleted");
-        await rerender();
-    } catch (error) {
-        alert(error.message);
-    }
-}
-
-function blobToBase64(blob) {
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-
-        reader.addEventListener("load", () => {
-            const result = reader.result;
-
-            if (typeof result !== "string") {
-                reject(new Error("Failed to read blob as data URL."));
-                return;
-            }
-
-            const commaIndex = result.indexOf(",");
-            if (commaIndex === -1) {
-                reject(new Error("Invalid blob data URL."));
-                return;
-            }
-
-            resolve(result.slice(commaIndex + 1));
+        // Added back the Root folder item and the Recursive call
+        this.els.sidebar.innerHTML = `<div class="file-item" data-path="/" style="font-weight:bold">📦 Project Root</div>` + await buildTree("/");
+        
+        this.els.sidebar.querySelectorAll('.file-item[data-type="file"]').forEach(el => {
+            el.onclick = () => this.open(el.dataset.path);
         });
+    }
 
-        reader.addEventListener("error", () => {
-            reject(reader.error || new Error("Failed to read blob."));
-        });
+    async open(path) {
+        this.path = path;
+        const content = await fs.readText(path);
+        this.setEditorValue(content);
+        this.els.pathLab.textContent = path;
+        this.refresh();
+    }
 
-        reader.readAsDataURL(blob);
-    });
+    log(msg, color = "white") {
+        const line = document.createElement("div");
+        line.style.color = color;
+        line.style.marginBottom = "2px";
+        line.textContent = `> ${msg}`;
+        this.els.console.appendChild(line);
+        this.els.console.scrollTop = this.els.console.scrollHeight;
+    }
 }
 
-async function exportProject() {
-    const exportEntries = [];
-    const blobFiles = [];
-
-    for (const entry of fs.listEntries()) {
-        if (!entry.exportable) continue;
-
-        if (entry.type === "file" && entry.encoding === "blob" && entry.blobKey) {
-            const blob = await loadBlob(entry.blobKey);
-            if (!blob) continue;
-
-            const base64 = await blobToBase64(blob);
-
-            exportEntries.push({
-                ...entry,
-                encoding: "base64",
-                inlineText: null,
-                blobKey: null
-            });
-
-            blobFiles.push({
-                path: entry.path,
-                base64
-            });
-        } else {
-            exportEntries.push(structuredClone(entry));
-        }
-    }
-
-    const payload = {
-        version: 3,
-        exportedAt: new Date().toISOString(),
-        entries: exportEntries,
-        blobFiles
-    };
-
-    const json = JSON.stringify(payload, null, 2);
-    const blob = new Blob([json], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "webengine-project.json";
-    a.click();
-
-    URL.revokeObjectURL(url);
-    setStatus("Project exported");
-}
-
-async function importProjectFile(file) {
-    const text = await file.text();
-    const data = JSON.parse(text);
-
-    if (!data || typeof data !== "object") {
-        throw new Error("Invalid project file.");
-    }
-
-    if (!Array.isArray(data.entries)) {
-        throw new Error("Project file is missing entries.");
-    }
-
-    const blobFilesByPath = new Map();
-    for (const item of data.blobFiles || []) {
-        if (item && typeof item.path === "string" && typeof item.base64 === "string") {
-            blobFilesByPath.set(item.path, item.base64);
-        }
-    }
-
-    setStatus("Clearing current project...");
-    await clearEntries();
-    await clearBlobs();
-
-    const importedEntries = [];
-
-    for (const rawEntry of data.entries) {
-        const entry = structuredClone(rawEntry);
-
-        if (entry.type === "file" && entry.encoding === "base64") {
-            const base64 = blobFilesByPath.get(entry.path);
-
-            if (!base64) {
-                throw new Error(`Missing blob data for ${entry.path}`);
-            }
-
-            entry.encoding = "blob";
-            entry.inlineText = null;
-            entry.blobKey = `blob:${entry.path}`;
-
-            const blob = base64ToBlob(base64, entry.mimeType || "application/octet-stream");
-            await saveBlob(entry.blobKey, blob);
-        }
-
-        importedEntries.push(entry);
-    }
-
-    fs.loadEntries(importedEntries);
-    await saveEntries(fs.listEntries());
-
-    selectedPath = "/";
-    setStatus("Project imported");
-    await rerender();
-}
-
-newFolderBtn.addEventListener("click", createFolderPrompt);
-newFileBtn.addEventListener("click", createFilePrompt);
-
-uploadBtn.addEventListener("click", () => {
-    setStatus("Opening upload picker...");
-    uploadInput.click();
-});
-
-importBtn.addEventListener("click", () => {
-    setStatus("Opening import picker...");
-    importInput.click();
-});
-
-uploadInput.addEventListener("change", async () => {
-    const files = Array.from(uploadInput.files || []);
-    if (files.length === 0) {
-        setStatus("No file selected");
-        return;
-    }
-
-    setStatus(`Starting upload of ${files.length} file${files.length === 1 ? "" : "s"}...`);
-    await uploadFiles(files);
-    uploadInput.value = "";
-});
-
-importInput.addEventListener("change", async () => {
-    const file = importInput.files?.[0];
-    if (!file) {
-        setStatus("No import file selected");
-        return;
-    }
-
-    try {
-        setStatus(`Importing ${file.name}...`);
-        await importProjectFile(file);
-    } catch (error) {
-        console.error(error);
-        setStatus(`Import failed: ${error.message}`);
-        alert(error.message);
-    } finally {
-        importInput.value = "";
-    }
-});
-
-deleteBtn.addEventListener("click", deleteSelectedEntry);
-exportBtn.addEventListener("click", exportProject);
-
-initialize();
-
-window.fs = fs;
+new App();
