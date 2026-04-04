@@ -2,10 +2,38 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta author="isodev">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WebEngine: Editor</title>
 </head>
 <body>
-    <button>Export</button>
+    <button id="newFolderBtn">New Folder</button>
+    <button id="newFileBtn">New File</button>
+    <button id="uploadBtn">Upload</button>
+    <button id="importBtn">Import</button>
+    <button id="deleteBtn">Delete</button>
+    <button id="exportBtn">Export</button>
+
+    <input id="uploadInput" type="file" multiple hidden>
+    <input id="importInput" type="file" accept=".json,application/json" hidden>
+
+    <div id="uploadStatus">Idle</div>
+
+    <hr>
+
+    <table border="1" cellpadding="8" cellspacing="0" width="100%">
+        <tr>
+            <td valign="top" width="30%">
+                <h3>Filesystem</h3>
+                <div id="fileTree"></div>
+            </td>
+            <td valign="top">
+                <h3 id="editorTitle">No selection</h3>
+                <div id="editorBody">Select a file or folder.</div>
+            </td>
+        </tr>
+    </table>
+
+    <script type="module" src="./app.js"></script>
 </body>
 </html>
