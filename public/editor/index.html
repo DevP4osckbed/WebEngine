@@ -4,33 +4,46 @@
     <meta charset="UTF-8">
     <title>WebEngine: Editor</title>
     <style>
-        :root { --bg: #1e1e1e; --panel: #252526; --border: #3a3a3a; --text: #d4d4d4; --hover: #2f2f2f; --active: #37373d; --folder: #9cdcfe; }
+        :root { --bg: #1e1e1e; --panel: #252526; --border: #3a3a3a; --text: #d4d4d4; --hover: #2f2f2f; --active: #37373d; --accent: #4ec9b0; }
         * { box-sizing: border-box; }
-        body { margin: 0; font-family: monospace; background: var(--bg); color: var(--text); height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
+        body { margin: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: var(--bg); color: var(--text); height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
         
         #menubar { height: 35px; background: #2d2d2d; border-bottom: 1px solid var(--border); display: flex; align-items: center; padding: 0 5px; z-index: 100; }
         .menu { position: relative; }
-        .menu-btn { background: none; border: none; color: var(--text); padding: 5px 10px; cursor: pointer; font-family: inherit; }
+        .menu-btn { background: none; border: none; color: var(--text); padding: 5px 10px; cursor: pointer; font-family: inherit; font-size: 13px; }
         .menu-btn:hover, .menu.open .menu-btn { background: var(--hover); }
-        .dropdown { position: absolute; top: 100%; left: 0; background: var(--panel); border: 1px solid var(--border); min-width: 180px; display: none; box-shadow: 0 4px 10px rgba(0,0,0,0.5); }
+        .dropdown { position: absolute; top: 100%; left: 0; background: var(--panel); border: 1px solid var(--border); min-width: 180px; display: none; box-shadow: 0 4px 10px rgba(0,0,0,0.5); z-index: 1000;}
         .menu.open .dropdown { display: block; }
-        .menu-item { width: 100%; text-align: left; background: none; border: none; color: var(--text); padding: 8px 12px; cursor: pointer; border-bottom: 1px solid #333; font-family: inherit; }
+        .menu-item { width: 100%; text-align: left; background: none; border: none; color: var(--text); padding: 8px 12px; cursor: pointer; border-bottom: 1px solid #333; font-family: inherit; font-size: 13px; }
         .menu-item:hover { background: var(--hover); }
 
         #workspace { display: flex; flex: 1; min-height: 0; }
         #sidebar { width: 240px; border-right: 1px solid var(--border); background: var(--panel); overflow-y: auto; }
         #main { flex: 1; display: flex; flex-direction: column; }
         
-        /* Updated for CodeMirror */
-        #editor-container { flex: 1; overflow: hidden; background: var(--bg); }
+        #tab-bar { background: #2d2d2d; border-bottom: 1px solid var(--border); display: flex; }
+        .tab-btn { background: none; border: none; color: #888; padding: 8px 20px; cursor: pointer; font-family: inherit; font-size: 11px; border-right: 1px solid var(--border); text-transform: uppercase; letter-spacing: 1px; }
+        .tab-btn:hover { background: var(--hover); }
+        .tab-btn.active { background: var(--bg); color: var(--accent); border-bottom: 2px solid var(--accent); }
+
+        #view-container { flex: 1; position: relative; overflow: hidden; display: flex; flex-direction: column; }
+        #editor-container { flex: 1; display: none; }
+        #editor-container.active { display: block; overflow-y: auto;}
         .cm-editor { height: 100% !important; }
         
-        #console { height: 180px; background: #000; border-top: 1px solid var(--border); overflow-y: auto; padding: 10px; font-size: 12px; font-family: 'Consolas', monospace; }
-        .file-item { padding: 4px 8px; cursor: pointer; white-space: nowrap; font-size: 13px; }
+        #player-container { flex: 1; display: none; justify-content: center; align-items: center; background: #000; position: relative; }
+        #player-container.active { display: flex; }
+        .viewport-frame { width: 854px; height: 480px; background: #111; position: relative; box-shadow: 0 0 30px rgba(0,0,0,0.5); border: 2px solid #333; }
+        #game-canvas { width: 100%; height: 100%; display: block; outline: none; }
+
+        #console { height: 180px; background: #000; border-top: 1px solid var(--border); overflow-y: auto; padding: 10px; font-size: 12px; font-family: 'Consolas', 'Courier New', monospace; line-height: 1.4; }
+        .file-item { padding: 6px 10px; cursor: pointer; white-space: nowrap; font-size: 13px; display: flex; align-items: center; gap: 6px; }
         .file-item:hover { background: var(--hover); }
-        .file-item.active { background: var(--active); border-left: 2px solid #007acc; }
+        .file-item.active { background: var(--active); color: var(--accent); font-weight: bold; }
         
-        #ctx { position: fixed; background: var(--panel); border: 1px solid var(--border); display: none; z-index: 1000; box-shadow: 2px 2px 5px rgba(0,0,0,0.3); }
+        #ctx { position: fixed; background: var(--panel); border: 1px solid var(--border); display: none; z-index: 1000; box-shadow: 4px 4px 15px rgba(0,0,0,0.4); }
+        
+        .play-controls { position: absolute; top: 10px; right: 10px; display: flex; gap: 5px; z-index: 10; }
     </style>
 </head>
 <body>
@@ -53,14 +66,29 @@
             <button class="menu-item" data-action="refresh">Refresh Files</button>
         </div>
     </div>
-    <button class="menu-btn" data-action="run-project" style="color: #4ec9b0; font-weight: bold; margin-left: 10px; border: 1px solid #4ec9b033; border-radius: 3px;">▶ Run</button>
+    <button class="menu-btn" data-action="run-project" id="run-btn-main" style="color: var(--accent); font-weight: bold; margin-left: 10px;">▶ Play</button>
+    <button class="menu-btn" data-action="stop-project" id="stop-btn-main" style="color: #f44747; font-weight: bold; display: none;">■ Stop</button>
     <div style="margin-left: auto; padding-right: 10px; opacity: 0.5; font-size: 11px;" id="path-label">No file selected</div>
 </div>
 
 <div id="workspace">
     <div id="sidebar"></div>
     <div id="main">
-        <div id="editor-container"></div>
+        <div id="tab-bar">
+            <button class="tab-btn active" data-tab="editor">Editor</button>
+            <button class="tab-btn" data-tab="player">Play Mode</button>
+        </div>
+
+        <div id="view-container">
+            <div id="editor-container" class="tab-content active"></div>
+            
+            <div id="player-container" class="tab-content">
+                <div class="viewport-frame">
+                    <canvas id="game-canvas" width="854" height="480"></canvas>
+                </div>
+            </div>
+        </div>
+
         <div id="console">WebEngine Ready.</div>
     </div>
 </div>
