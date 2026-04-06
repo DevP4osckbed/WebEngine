@@ -2,13 +2,14 @@ export class IsoAPI {
     constructor(workerContext, width = 854, height = 480) {
         this.WIDTH = width;
         this.HEIGHT = height;
-        this.VERISON = '1.0.12';
+        this.VERISON = '1.5.0';
         this._worker = workerContext;
 
         // Internal Input State
         this._keys = new Set();
         this._mouseButtons = new Set();
         this._mouseDelta = { x: 0, y: 0 };
+        this._isMouseLocked = false; // New tracked state
 
         // Graphics Layers
         this.canvas3d = new OffscreenCanvas(this.WIDTH, this.HEIGHT);
@@ -35,6 +36,11 @@ export class IsoAPI {
         return { ...this._mouseDelta };
     }
 
+    // NEW: Check if mouse is locked
+    isMouseLocked() {
+        return this._isMouseLocked;
+    }
+
     setMouseLock(locked) {
         this._worker.postMessage({ type: 'LOCK_MOUSE', value: locked });
     }
@@ -49,6 +55,10 @@ export class IsoAPI {
         if (e.type === 'mousemove') {
             this._mouseDelta.x += e.movementX;
             this._mouseDelta.y += e.movementY;
+        }
+        // Sync the lock state from the main thread
+        if (e.type === 'LOCK_STATE_CHANGE') {
+            this._isMouseLocked = e.value;
         }
     }
 

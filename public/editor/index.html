@@ -2,7 +2,9 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>WebEngine: Editor</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IsoEngine: IDE</title>
+    <script src="https://code.iconify.design/iconify-icon/3.0.0/iconify-icon.min.js"></script>
     <style>
         :root { --bg: #1e1e1e; --panel: #252526; --border: #3a3a3a; --text: #d4d4d4; --hover: #2f2f2f; --active: #37373d; --accent: #4ec9b0; }
         * { box-sizing: border-box; }
@@ -21,18 +23,32 @@
         #sidebar { width: 240px; border-right: 1px solid var(--border); background: var(--panel); overflow-y: auto; }
         #main { flex: 1; display: flex; flex-direction: column; }
         
-        #tab-bar { background: #2d2d2d; border-bottom: 1px solid var(--border); display: flex; }
-        .tab-btn { background: none; border: none; color: #888; padding: 8px 20px; cursor: pointer; font-family: inherit; font-size: 11px; border-right: 1px solid var(--border); text-transform: uppercase; letter-spacing: 1px; }
+        #tab-bar-container { display: flex; background: #2d2d2d; border-bottom: 1px solid var(--border); overflow: hidden; height: 35px; }
+        #file-tabs { display: flex; flex: 1; overflow-x: auto; scrollbar-width: none; }
+        #file-tabs::-webkit-scrollbar { display: none; }
+        
+        #mode-tabs { display: flex; border-left: 1px solid var(--border); }
+        .tab-btn { background: none; border: none; color: #888; padding: 0 15px; cursor: pointer; font-family: inherit; font-size: 11px; border-right: 1px solid var(--border); text-transform: uppercase; letter-spacing: 1px; height: 100%; }
         .tab-btn:hover { background: var(--hover); }
         .tab-btn.active { background: var(--bg); color: var(--accent); border-bottom: 2px solid var(--accent); }
 
-        #view-container { flex: 1; position: relative; overflow: hidden; display: flex; flex-direction: column; }
-        #editor-container { flex: 1; display: none; }
-        #editor-container.active { display: block; overflow-y: auto;}
-        .cm-editor { height: 100% !important; }
+        #view-container { flex: 1; position: relative; overflow: hidden; display: flex; flex-direction: column; background: #111; }
+        .tab-content { flex: 1; width: 100%; height: 100%; display: none; }
+        .tab-content.active { display: block; }
         
-        #player-container { flex: 1; display: none; justify-content: center; align-items: center; background: #000; position: relative; }
-        #player-container.active { display: flex; }
+        #editor-container { background: var(--bg); }
+        .cm-editor { height: 100% !important; }
+
+        #preview-container { 
+            display: none; 
+            background: #111; 
+            justify-content: center; 
+            align-items: center; 
+            flex-direction: column; 
+            color: #555;
+        }
+        
+        #player-container { display: none; justify-content: center; align-items: center; background: #000; position: relative; }
         .viewport-frame { width: 854px; height: 480px; background: #111; position: relative; box-shadow: 0 0 30px rgba(0,0,0,0.5); border: 2px solid #333; }
         #game-canvas { width: 100%; height: 100%; display: block; outline: none; }
 
@@ -42,8 +58,21 @@
         .file-item.active { background: var(--active); color: var(--accent); font-weight: bold; }
         
         #ctx { position: fixed; background: var(--panel); border: 1px solid var(--border); display: none; z-index: 1000; box-shadow: 4px 4px 15px rgba(0,0,0,0.4); }
-        
-        .play-controls { position: absolute; top: 10px; right: 10px; display: flex; gap: 5px; z-index: 10; }
+    
+        .file-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 16px;
+            height: 16px;
+            flex: 0 0 16px;
+            color: #c5c5c5;
+        }
+
+        .file-icon iconify-icon {
+            width: 16px;
+            height: 16px;
+        }
     </style>
 </head>
 <body>
@@ -53,16 +82,13 @@
         <button class="menu-btn">File</button>
         <div class="dropdown">
             <button class="menu-item" data-action="new-file">New File</button>
-            <button class="menu-item" data-action="new-folder">New Folder</button>
             <button class="menu-item" data-action="save-file">Save (Ctrl+S)</button>
-            <button class="menu-item" data-action="import-project">Import Project</button>
-            <button class="menu-item" data-action="export-project">Export Project</button>
+            <button class="menu-item" data-action="upload-files">Upload Media</button>
         </div>
     </div>
     <div class="menu">
         <button class="menu-btn">Project</button>
         <div class="dropdown">
-            <button class="menu-item" data-action="upload-files">Upload Media</button>
             <button class="menu-item" data-action="refresh">Refresh Files</button>
         </div>
     </div>
@@ -74,14 +100,17 @@
 <div id="workspace">
     <div id="sidebar"></div>
     <div id="main">
-        <div id="tab-bar">
-            <button class="tab-btn active" data-tab="editor">Editor</button>
-            <button class="tab-btn" data-tab="player">Play Mode</button>
+        <div id="tab-bar-container">
+            <div id="file-tabs"></div>
+            <div id="mode-tabs">
+                <button class="tab-btn active" data-tab="editor">Editor</button>
+                <button class="tab-btn" data-tab="player">Play Mode</button>
+            </div>
         </div>
 
         <div id="view-container">
             <div id="editor-container" class="tab-content active"></div>
-            
+            <div id="preview-container" class="tab-content"></div>
             <div id="player-container" class="tab-content">
                 <div class="viewport-frame">
                     <canvas id="game-canvas" width="854" height="480"></canvas>
